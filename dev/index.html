@@ -106,6 +106,7 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
 .opts{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:flex-end}
 .color{width:48px;height:40px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:3px}
 .check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:.95rem;cursor:pointer}
+.check:has(input:disabled){opacity:.5;cursor:default}
 .check input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--focus);flex:none}
 .foot{max-width:1280px;margin:18px auto 0;color:var(--muted);font-size:.88rem}
 .ph-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
@@ -198,6 +199,7 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
       </div>
       <p class="tip">A marker's point sits on the spot, so the map right there stays visible. In the PDF every pin keeps a large tap area, even at size S.</p>
       <label class="check"><input type="checkbox" id="closeIn"><span>Show a close-up of the map on each place's page, with a ring around the spot</span></label>
+      <label class="check"><input type="checkbox" id="zoomIn"><span>Tapping the close-up opens a larger map of the place. When this is off, the close-up can't be tapped; only photos can.</span></label>
       <div class="opts">
         <div>
           <span class="f" id="pmLbl">Photos on the place's page</span>
@@ -274,6 +276,7 @@ function normalize(p) {
   p.v = 2;
   p.pinStyle = p.pinStyle || "drop"; p.pinSize = p.pinSize || "M";
   if (p.closeups === undefined) p.closeups = true;
+  if (p.zoomPage === undefined) p.zoomPage = true;
   p.photoMode = p.photoMode || "side";
   if (!p.map.crop) p.map.crop = {x:0, y:0, w:p.map.w, h:p.map.h};
   p.pins.forEach(x => { x.id = x.id || uid(); x.photos = x.photos || []; x.link = x.link || ""; });
@@ -286,7 +289,7 @@ function sampleProject() {
 }
 function blankProject(map) {
   const o = project || {};
-  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, photoMode:o.photoMode, map, pins:[]});
+  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, zoomPage:o.zoomPage, photoMode:o.photoMode, map, pins:[]});
 }
 function attachImg(ph, im) { Object.defineProperty(ph, "_img", {value:im, enumerable:false, writable:true, configurable:true}); }
 async function loadPhotoImgs(p) {
@@ -606,6 +609,7 @@ function renderSettings() {
   document.querySelectorAll("[data-size]").forEach(b => b.setAttribute("aria-pressed", b.dataset.size === project.pinSize));
   $("colIn").value = project.color.toLowerCase();
   $("closeIn").checked = !!project.closeups;
+  $("zoomIn").checked = !!project.zoomPage; $("zoomIn").disabled = !project.closeups;
   document.querySelectorAll("[data-pm]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pm === project.photoMode));
 }
 $("tIn").oninput = e => { project.title = e.target.value; changed(); };
@@ -616,7 +620,8 @@ $("styDrop").onclick = () => { project.pinStyle = "drop"; renderAll(); changed()
 $("styDot").onclick = () => { project.pinStyle = "dot"; renderAll(); changed(); };
 document.querySelectorAll("[data-size]").forEach(b => b.onclick = () => { project.pinSize = b.dataset.size; renderAll(); changed(); });
 $("colIn").oninput = e => { project.color = e.target.value; renderPins(); applyView(); renderList(); renderEditor(); changed(); };
-$("closeIn").onchange = e => { project.closeups = e.target.checked; changed(); };
+$("closeIn").onchange = e => { project.closeups = e.target.checked; renderSettings(); changed(); };
+$("zoomIn").onchange = e => { project.zoomPage = e.target.checked; changed(); };
 document.querySelectorAll("[data-pm]").forEach(b => b.onclick = () => { project.photoMode = b.dataset.pm; renderAll(); changed(); });
 
 function renderAll() { renderMapbar(); renderPins(); applyView(); renderEditor(); renderList(); renderSettings(); schedulePreview(); }
@@ -714,7 +719,7 @@ function buildSpec(ctx) {
   project.pins.forEach((pin, i) => {
     first[pin.id] = pages.length;
     infoLayout(ctx, pin).forEach((lines, k) => pages.push({kind:"info", pin, i, lines, k}));
-    if (project.closeups && inCrop(pin)) { pages.push({kind:"zoom", pin, i}); zoomAt[pin.id] = pages.length - 1; }
+    if (project.closeups && project.zoomPage && inCrop(pin)) { pages.push({kind:"zoom", pin, i}); zoomAt[pin.id] = pages.length - 1; }
     photoAt[pin.id] = pin.photos.map((ph, j) => (pages.push({kind:"photo", pin, i, j}), pages.length - 1));
   });
   return {pages, first, photoAt, zoomAt, listStart:ml.own ? 1 : null};
@@ -853,8 +858,7 @@ function drawCloseup(ctx, pin, links, I, target) {
   const mx = I.x + (px - sx) / rw * I.w, my = I.y + (py - sy) / rh * I.h;   // hollow ring keeps the spot visible
   ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(mx, my, 15, 0, Math.PI * 2); ctx.stroke();
   ctx.lineWidth = 3; ctx.strokeStyle = project.color; ctx.beginPath(); ctx.arc(mx, my, 15, 0, Math.PI * 2); ctx.stroke();
-  zoomBadge(ctx, I, WORDS[project.dir].enlarge);
-  if (target != null) links.push({rect:[I.x, I.y, I.w, I.h], target});
+  if (target != null) { zoomBadge(ctx, I, WORDS[project.dir].enlarge); links.push({rect:[I.x, I.y, I.w, I.h], target}); }
   return true;
 }
 // exporting: leave the map image and its pins out; they are added to the PDF as full-resolution image and vector shapes
@@ -1058,7 +1062,7 @@ function drawZoomPage(ctx, pg, exporting, links, spec) {
 function estimateBytes() {
   const C = project.map.crop, b = project.map.src.length * 0.75;
   let t = project.map.src.length + b * (C.w * C.h) / (project.map.w * project.map.h);
-  let pages = 1 + project.pins.length * (project.closeups ? 2 : 1);
+  let pages = 1 + project.pins.length * (project.closeups && project.zoomPage ? 2 : 1);
   project.pins.forEach(p => p.photos.forEach(ph => { t += ph.src.length * 0.75; pages++; }));
   return t + pages * 120000;
 }
