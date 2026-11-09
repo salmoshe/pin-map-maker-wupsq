@@ -209,6 +209,15 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
         </div>
       </div>
       <p class="tip"><b>Side by side</b> puts the close-up and the first photo next to each other. <b>Large</b> gives the photo the full width. <b>Small row</b> shows up to four thumbnails and leaves the most room for text. Every photo also gets its own full-screen page with its caption.</p>
+      <div class="opts">
+        <div>
+          <span class="f" id="psLbl">Photo size</span>
+          <div class="seg" role="group" aria-labelledby="psLbl">
+            <button type="button" data-ps="S">Small</button><button type="button" data-ps="M">Standard</button><button type="button" data-ps="L">Large</button>
+          </div>
+        </div>
+      </div>
+      <p class="tip">Applies to photos you add. <b>Small</b> (1,200 px) makes photos about half as heavy and still looks good on a phone. <b>Standard</b> (1,600 px) is a good balance. <b>Large</b> (2,400 px) is for photos people will zoom into, and roughly doubles their weight.</p>
       <p class="tip">The saved PDF also keeps everything you set up here. Open it with <b>Open map or PDF</b> to change it later.</p>
     </section>
   </aside>
@@ -226,7 +235,7 @@ const WORDS = {
   ltr:{back:"Back to map", list:"All places", cont:"(continued)", places:"Places on this map", hint:"Tap a pin on the map or a name below",
     photos:n => n === 1 ? "1 photo" : `${n} photos`, photoOf:(a, b) => `Photo ${a} of ${b}`, more:"More photos", toPlace:"Place page", zoomSub:"On the map", enlarge:"Enlarge", next:"Next", prev:"Previous"}
 };
-const MAX_PHOTOS = 6, PHOTO_SIDE = 1600;
+const MAX_PHOTOS = 6, PHOTO_SIDES = {S:1200, M:1600, L:2400}, SIZE_NAMES = {S:"Small", M:"Standard", L:"Large"};
 const DROP = "M17 3c-6 0-10.5 4.5-10.5 10.3C6.5 21 17 31 17 31s10.5-10 10.5-17.7C27.5 7.5 23 3 17 3z"; // tip (17,31), head centre (17,13.3), head radius 10.5
 const R_PT = {S:7.5, M:9.5, L:12};     // head radius on the PDF map page, in points
 const R_PX = {S:10, M:13, L:16};       // head radius in the editor, in screen pixels
@@ -278,6 +287,7 @@ function normalize(p) {
   if (p.closeups === undefined) p.closeups = true;
   if (p.zoomPage === undefined) p.zoomPage = true;
   p.photoMode = p.photoMode || "side";
+  p.photoSize = PHOTO_SIDES[p.photoSize] ? p.photoSize : "M";
   if (!p.map.crop) p.map.crop = {x:0, y:0, w:p.map.w, h:p.map.h};
   p.pins.forEach(x => { x.id = x.id || uid(); x.photos = x.photos || []; x.link = x.link || ""; });
   return p;
@@ -289,7 +299,7 @@ function sampleProject() {
 }
 function blankProject(map) {
   const o = project || {};
-  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, zoomPage:o.zoomPage, photoMode:o.photoMode, map, pins:[]});
+  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, zoomPage:o.zoomPage, photoMode:o.photoMode, photoSize:o.photoSize, map, pins:[]});
 }
 function attachImg(ph, im) { Object.defineProperty(ph, "_img", {value:im, enumerable:false, writable:true, configurable:true}); }
 async function loadPhotoImgs(p) {
@@ -303,7 +313,7 @@ async function addPhotos(pin, files) {
   for (const f of use) {
     try {
       const src = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
-      const im = await loadImage(src), k = Math.min(1, PHOTO_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
+      const im = await loadImage(src), k = Math.min(1, PHOTO_SIDES[project.photoSize] / Math.max(im.naturalWidth, im.naturalHeight));
       const c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
       const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
       x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, c.width, c.height);
@@ -611,6 +621,7 @@ function renderSettings() {
   $("closeIn").checked = !!project.closeups;
   $("zoomIn").checked = !!project.zoomPage; $("zoomIn").disabled = !project.closeups;
   document.querySelectorAll("[data-pm]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pm === project.photoMode));
+  document.querySelectorAll("[data-ps]").forEach(b => b.setAttribute("aria-pressed", b.dataset.ps === project.photoSize));
 }
 $("tIn").oninput = e => { project.title = e.target.value; changed(); };
 $("sIn").oninput = e => { project.subtitle = e.target.value; changed(); };
@@ -623,6 +634,31 @@ $("colIn").oninput = e => { project.color = e.target.value; renderPins(); applyV
 $("closeIn").onchange = e => { project.closeups = e.target.checked; renderSettings(); changed(); };
 $("zoomIn").onchange = e => { project.zoomPage = e.target.checked; changed(); };
 document.querySelectorAll("[data-pm]").forEach(b => b.onclick = () => { project.photoMode = b.dataset.pm; renderAll(); changed(); });
+const mbText = () => { const mb = estimateBytes() / 1048576; return `${mb < 1 ? "1" : mb.toFixed(mb < 10 ? 1 : 0)} MB`; };
+document.querySelectorAll("[data-ps]").forEach(b => b.onclick = () => {
+  if (project.photoSize === b.dataset.ps) return;
+  project.photoSize = b.dataset.ps; renderSettings(); changed();
+  const side = PHOTO_SIDES[project.photoSize], name = SIZE_NAMES[project.photoSize];
+  let big = 0, any = 0;
+  project.pins.forEach(p => p.photos.forEach(ph => { any++; if (Math.max(ph.w, ph.h) > side + 1) big++; }));
+  if (big) {
+    say(`New photos will be saved at ${name} size. ${big} photo${big > 1 ? "s" : ""} you already added ${big > 1 ? "are" : "is"} bigger than that. <button class="btn small" type="button" id="shrinkBtn">Shrink ${big > 1 ? "them" : "it"} too</button> Shrinking can't be undone.`);
+    $("shrinkBtn").onclick = () => shrinkPhotos(side);
+  } else say(`New photos will be saved at ${name} size.` + (any && project.photoSize === "L" ? " Photos you already added keep their size; add them again to get the larger version." : ""));
+});
+async function shrinkPhotos(side) {
+  let n = 0;
+  for (const pin of project.pins) for (const ph of pin.photos) {
+    if (Math.max(ph.w, ph.h) <= side + 1) continue;
+    const im = ph._img || await loadImage(ph.src), k = side / Math.max(ph.w, ph.h);
+    const c = document.createElement("canvas"); c.width = Math.round(ph.w * k); c.height = Math.round(ph.h * k);
+    const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, c.width, c.height);
+    ph.src = c.toDataURL("image/jpeg", 0.85); ph.w = c.width; ph.h = c.height;
+    attachImg(ph, await loadImage(ph.src)); n++;
+  }
+  renderAll(); changed();
+  say(`Shrunk ${n} photo${n > 1 ? "s" : ""}. The PDF is now about ${mbText()}.`);
+}
 
 function renderAll() { renderMapbar(); renderPins(); applyView(); renderEditor(); renderList(); renderSettings(); schedulePreview(); }
 window.addEventListener("resize", () => { if (project) { applyView(); schedulePreview(); } });
