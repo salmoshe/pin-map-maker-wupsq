@@ -106,6 +106,7 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
 .opts{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:flex-end}
 .color{width:48px;height:40px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:3px}
 .check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:.95rem;cursor:pointer}
+.check:has(input:disabled){opacity:.5;cursor:default}
 .check input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--focus);flex:none}
 .foot{max-width:1280px;margin:18px auto 0;color:var(--muted);font-size:.88rem}
 .ph-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
@@ -197,6 +198,7 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
       </div>
       <p class="tip">A marker's point sits on the spot, so the map right there stays visible. In the PDF every pin keeps a large tap area, even at size S.</p>
       <label class="check"><input type="checkbox" id="closeIn"><span>Show a close-up of the map on each place's page, with a ring around the spot</span></label>
+      <label class="check"><input type="checkbox" id="zoomIn"><span>Tapping the close-up opens a larger map of the place. When this is off, the close-up can't be tapped; only photos can.</span></label>
       <div class="opts">
         <div>
           <span class="f" id="pmLbl">Photos on the place's page</span>
@@ -219,9 +221,9 @@ const PW = 400, PH = 866, EXPORT_SCALE = 3, MAX_SRC = 4096;
 const OUT = {bg:"#FBF8F0", page:"#FFFFFF", band:"#F3EEDF", ink:"#2E2A24", muted:"#6E6658", line:"#E3DAC4", chip:"#FBF8F0", frame:"#B9AE95"};
 const WORDS = {
   rtl:{back:"חזרה למפה", list:"רשימת המקומות", cont:"(המשך)", places:"המקומות במפה", hint:"הקישו על נקודה במפה או על שם ברשימה",
-    photos:n => n === 1 ? "תמונה אחת" : `${n} תמונות`, photoOf:(a, b) => `תמונה ${a} מתוך ${b}`, more:"לתמונות נוספות", toPlace:"לדף המקום"},
+    photos:n => n === 1 ? "תמונה אחת" : `${n} תמונות`, photoOf:(a, b) => `תמונה ${a} מתוך ${b}`, more:"לתמונות נוספות", toPlace:"לדף המקום", zoomSub:"המיקום במפה", enlarge:"הגדלה", next:"הבאה", prev:"הקודמת"},
   ltr:{back:"Back to map", list:"All places", cont:"(continued)", places:"Places on this map", hint:"Tap a pin on the map or a name below",
-    photos:n => n === 1 ? "1 photo" : `${n} photos`, photoOf:(a, b) => `Photo ${a} of ${b}`, more:"More photos", toPlace:"Place page"}
+    photos:n => n === 1 ? "1 photo" : `${n} photos`, photoOf:(a, b) => `Photo ${a} of ${b}`, more:"More photos", toPlace:"Place page", zoomSub:"On the map", enlarge:"Enlarge", next:"Next", prev:"Previous"}
 };
 const MAX_PHOTOS = 6, PHOTO_SIDE = 1600;
 const DROP = "M17 3c-6 0-10.5 4.5-10.5 10.3C6.5 21 17 31 17 31s10.5-10 10.5-17.7C27.5 7.5 23 3 17 3z"; // tip (17,31), head centre (17,13.3), head radius 10.5
@@ -247,10 +249,11 @@ function say(html, kind) {
 }
 
 /* ---------- draft storage (this browser only) ---------- */
+const DB_NAME = /\/dev(\/|\/index\.html)?$/.test(location.pathname) ? "pinmap-dev" : "pinmap";
 const store = (() => {
   let dbp = null;
   const open = () => dbp || (dbp = new Promise((res, rej) => {
-    try { const r = indexedDB.open("pinmap", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }
+    try { const r = indexedDB.open(DB_NAME, 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }
     catch (e) { rej(e); }
   }));
   const run = (m, fn) => open().then(db => new Promise((res, rej) => { const t = db.transaction("kv", m), q = fn(t.objectStore("kv")); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }));
@@ -272,6 +275,7 @@ function normalize(p) {
   p.v = 2;
   p.pinStyle = p.pinStyle || "drop"; p.pinSize = p.pinSize || "M";
   if (p.closeups === undefined) p.closeups = true;
+  if (p.zoomPage === undefined) p.zoomPage = true;
   p.photoMode = p.photoMode || "side";
   if (!p.map.crop) p.map.crop = {x:0, y:0, w:p.map.w, h:p.map.h};
   p.pins.forEach(x => { x.id = x.id || uid(); x.photos = x.photos || []; x.link = x.link || ""; });
@@ -284,7 +288,7 @@ function sampleProject() {
 }
 function blankProject(map) {
   const o = project || {};
-  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, photoMode:o.photoMode, map, pins:[]});
+  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, zoomPage:o.zoomPage, photoMode:o.photoMode, map, pins:[]});
 }
 function attachImg(ph, im) { Object.defineProperty(ph, "_img", {value:im, enumerable:false, writable:true, configurable:true}); }
 async function loadPhotoImgs(p) {
@@ -604,6 +608,7 @@ function renderSettings() {
   document.querySelectorAll("[data-size]").forEach(b => b.setAttribute("aria-pressed", b.dataset.size === project.pinSize));
   $("colIn").value = project.color.toLowerCase();
   $("closeIn").checked = !!project.closeups;
+  $("zoomIn").checked = !!project.zoomPage; $("zoomIn").disabled = !project.closeups;
   document.querySelectorAll("[data-pm]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pm === project.photoMode));
 }
 $("tIn").oninput = e => { project.title = e.target.value; changed(); };
@@ -614,7 +619,8 @@ $("styDrop").onclick = () => { project.pinStyle = "drop"; renderAll(); changed()
 $("styDot").onclick = () => { project.pinStyle = "dot"; renderAll(); changed(); };
 document.querySelectorAll("[data-size]").forEach(b => b.onclick = () => { project.pinSize = b.dataset.size; renderAll(); changed(); });
 $("colIn").oninput = e => { project.color = e.target.value; renderPins(); applyView(); renderList(); renderEditor(); changed(); };
-$("closeIn").onchange = e => { project.closeups = e.target.checked; changed(); };
+$("closeIn").onchange = e => { project.closeups = e.target.checked; renderSettings(); changed(); };
+$("zoomIn").onchange = e => { project.zoomPage = e.target.checked; changed(); };
 document.querySelectorAll("[data-pm]").forEach(b => b.onclick = () => { project.photoMode = b.dataset.pm; renderAll(); changed(); });
 
 function renderAll() { renderMapbar(); renderPins(); applyView(); renderEditor(); renderList(); renderSettings(); schedulePreview(); }
@@ -647,7 +653,7 @@ function parseBody(t) {
   });
 }
 const LM = 22, RM = PW - 22, BAND = 276, BTN_Y = PH - 128, CONT_TOP = BAND + 30, PBAND = 268, PBOX_Y = 282;
-const bodyBottom = BTN_Y - 16;
+const bodyBottom = BTN_Y - 16, NAV_Y = BTN_Y - 14 - 44, THUMB_Y = NAV_Y - 10 - 56;
 // what sits between the title band and the text on a place's first page
 function placeStack(pin) {
   const rtl = project.dir === "rtl", n = pin.photos.length, cl = project.closeups && inCrop(pin), mode = project.photoMode;
@@ -708,13 +714,14 @@ function mapLayout() {
 function buildSpec(ctx) {
   const ml = mapLayout(), pages = [{kind:"map", ml}];
   if (ml.own) for (let i = 0; i < project.pins.length; i += 22) pages.push({kind:"list", start:i, items:project.pins.slice(i, i + 22)});
-  const first = {}, photoAt = {};
+  const first = {}, photoAt = {}, zoomAt = {};
   project.pins.forEach((pin, i) => {
     first[pin.id] = pages.length;
     infoLayout(ctx, pin).forEach((lines, k) => pages.push({kind:"info", pin, i, lines, k}));
+    if (project.closeups && project.zoomPage && inCrop(pin)) { pages.push({kind:"zoom", pin, i}); zoomAt[pin.id] = pages.length - 1; }
     photoAt[pin.id] = pin.photos.map((ph, j) => (pages.push({kind:"photo", pin, i, j}), pages.length - 1));
   });
-  return {pages, first, photoAt, listStart:ml.own ? 1 : null};
+  return {pages, first, photoAt, zoomAt, listStart:ml.own ? 1 : null};
 }
 // where a pin lands on the map page (top-left origin, points)
 function pinOnPage(ml, p) {
@@ -804,6 +811,25 @@ function photoBadge(ctx, x, y, w, h, text) {
   camera(ctx, rtl ? px + pw - 17 : px + 17, py + ph / 2, 7, "#fff", "#2a2622");
   ctx.fillStyle = "#fff"; ctx.textAlign = "start"; ctx.fillText(text, rtl ? px + pw - 31 : px + 31, py + ph / 2 + 4.5);
 }
+function magnifier(ctx, x, y, s, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(x - s * 0.15, y - s * 0.15, s * 0.6, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + s * 0.3, y + s * 0.3); ctx.lineTo(x + s * 0.85, y + s * 0.85); ctx.stroke();
+  ctx.restore();
+}
+function zoomBadge(ctx, I, text) {
+  const rtl = project.dir === "rtl";
+  ctx.font = F(700, 13); ctx.direction = project.dir;
+  const pw = ctx.measureText(text).width + 38, ph = 28;
+  const px = rtl ? I.x + I.w - 8 - pw : I.x + 8, py = I.y + I.h - 8 - ph;
+  ctx.fillStyle = "rgba(20,18,15,.74)"; rrect(ctx, px, py, pw, ph, 14); ctx.fill();
+  magnifier(ctx, rtl ? px + pw - 17 : px + 17, py + ph / 2, 8, "#fff");
+  ctx.fillStyle = "#fff"; ctx.textAlign = "start"; ctx.fillText(text, rtl ? px + pw - 30 : px + 30, py + ph / 2 + 4.5);
+}
+function ring(ctx, x, y, r) {
+  ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 3; ctx.strokeStyle = project.color; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+}
 function linkButton(ctx, it, label) {
   const rtl = project.dir === "rtl";
   ctx.fillStyle = OUT.page; rrect(ctx, it.x, it.y, it.w, it.h, 20); ctx.fill();
@@ -815,7 +841,7 @@ function linkButton(ctx, it, label) {
   ctx.strokeStyle = project.color; ctx.lineWidth = 2; ctx.lineCap = "round";
   ctx.beginPath(); ctx.moveTo(ax - 5, cy + 5); ctx.lineTo(ax + 5, cy - 5); ctx.moveTo(ax - 2, cy - 5); ctx.lineTo(ax + 5, cy - 5); ctx.lineTo(ax + 5, cy + 2); ctx.stroke();
 }
-function drawCloseup(ctx, pin, links, I) {
+function drawCloseup(ctx, pin, links, I, target) {
   const W = project.map.w, H = project.map.h, C = project.map.crop;
   if (!inCrop(pin)) return false;
   const ar = I.w / I.h;
@@ -831,7 +857,7 @@ function drawCloseup(ctx, pin, links, I) {
   const mx = I.x + (px - sx) / rw * I.w, my = I.y + (py - sy) / rh * I.h;   // hollow ring keeps the spot visible
   ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(mx, my, 15, 0, Math.PI * 2); ctx.stroke();
   ctx.lineWidth = 3; ctx.strokeStyle = project.color; ctx.beginPath(); ctx.arc(mx, my, 15, 0, Math.PI * 2); ctx.stroke();
-  links.push({rect:[I.x, I.y, I.w, I.h], target:0});
+  if (target != null) { zoomBadge(ctx, I, WORDS[project.dir].enlarge); links.push({rect:[I.x, I.y, I.w, I.h], target}); }
   return true;
 }
 // exporting: leave the map image and its pins out; they are added to the PDF as full-resolution image and vector shapes
@@ -876,6 +902,8 @@ function drawPage(ctx, spec, pg, exporting) {
     bigButton(ctx, BTN_Y, Wd.back, links, 0, true);
   } else if (pg.kind === "photo") {
     drawPhotoPage(ctx, pg, exporting, links, spec);
+  } else if (pg.kind === "zoom") {
+    drawZoomPage(ctx, pg, exporting, links, spec);
   } else {
     const {pin, i, lines, k} = pg, rtl = project.dir === "rtl";
     ctx.fillStyle = OUT.bg; ctx.fillRect(0, 0, PW, PH);
@@ -896,7 +924,7 @@ function drawPage(ctx, spec, pg, exporting) {
     if (k === 0) {
       const st = placeStack(pin), n = pin.photos.length;
       st.items.forEach(it => {
-        if (it.t === "close") drawCloseup(ctx, pin, links, it);
+        if (it.t === "close") drawCloseup(ctx, pin, links, it, spec.zoomAt[pin.id]);
         else if (it.t === "photo") {
           drawCover(ctx, pin.photos[0], it.x, it.y, it.w, it.h, 10);
           photoBadge(ctx, it.x, it.y, it.w, it.h, Wd.photos(n));
@@ -935,13 +963,25 @@ function drawPage(ctx, spec, pg, exporting) {
 }
 
 function photoLayout(ctx, pg) {
-  const ph = pg.pin.photos[pg.j], cap = (ph.cap || "").trim();
+  const ph = pg.pin.photos[pg.j], n = pg.pin.photos.length, cap = (ph.cap || "").trim();
   ctx.font = F(400, 18); ctx.direction = project.dir;
-  const capLines = cap ? wrap(ctx, cap, RM - LM).slice(0, 4) : [];
-  const capH = capLines.length ? capLines.length * 25 + 14 : 0, avail = BTN_Y - 18 - PBOX_Y;
+  const capLines = cap ? wrap(ctx, cap, RM - LM).slice(0, 3) : [];
+  const capH = capLines.length ? capLines.length * 25 + 14 : 0, avail = (n >= 3 ? THUMB_Y : NAV_Y) - 12 - PBOX_Y;
   const k = Math.min(376 / ph.w, (avail - capH) / ph.h), w = ph.w * k, h = ph.h * k;
   const top = PBOX_Y + (avail - h - capH) / 2;
   return {ph, capLines, fit:{x:(PW - w) / 2, y:top, w, h}};
+}
+function zoomLayout(pin) {
+  const C = project.map.crop, W = project.map.w, H = project.map.h;
+  const box = {x:12, y:PBOX_Y, w:376, h:BTN_Y - 18 - PBOX_Y}, ar = box.w / box.h;
+  let rw = Math.max(C.w * 0.45, Math.min(C.w, 700)), rh = rw / ar;
+  if (rh > C.h) { rh = C.h; rw = rh * ar; }
+  if (rw > C.w) { rw = C.w; rh = rw / ar; }
+  const px = pin.x * W, py = pin.y * H;
+  const sx = clamp(px - rw / 2, C.x, C.x + C.w - rw), sy = clamp(py - rh / 2, C.y, C.y + C.h - rh);
+  const k = Math.min(box.w / rw, box.h / rh), bw = rw * k, bh = rh * k;
+  const b = {x:(PW - bw) / 2, y:box.y + (box.h - bh) / 2, w:bw, h:bh};
+  return {b, sx, sy, rw, rh, k, ring:{x:b.x + (px - sx) * k, y:b.y + (py - sy) * k}};
 }
 function halfButton(ctx, x, y, w, label, filled, links, target) {
   const h = 58;
@@ -951,8 +991,25 @@ function halfButton(ctx, x, y, w, label, filled, links, target) {
   ctx.fillText(label, x + w / 2, y + h / 2 + 7);
   links.push({rect:[x, y, w, h], target});
 }
-function drawPhotoPage(ctx, pg, exporting, links, spec) {
-  const Wd = WORDS[project.dir], rtl = project.dir === "rtl", {pin, i, j} = pg, n = pin.photos.length;
+function bottomButtons(ctx, pin, links, spec) {
+  const Wd = WORDS[project.dir], rtl = project.dir === "rtl", w = (RM - LM - 10) / 2;
+  halfButton(ctx, rtl ? LM + w + 10 : LM, BTN_Y, w, Wd.back, true, links, 0);
+  halfButton(ctx, rtl ? LM : LM + w + 10, BTN_Y, w, Wd.toPlace, false, links, spec.first[pin.id]);
+}
+function navButton(ctx, x, y, w, label, pointLeft, target, links) {
+  const h = 44, on = target != null, col = on ? project.color : OUT.line;
+  ctx.fillStyle = OUT.page; rrect(ctx, x, y, w, h, 22); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5; rrect(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, 22); ctx.stroke();
+  ctx.font = F(700, 17); ctx.direction = project.dir; ctx.textAlign = "center"; ctx.fillStyle = on ? project.color : OUT.frame;
+  const tw = ctx.measureText(label).width, cx = x + w / 2 + (pointLeft ? 8 : -8), cy = y + h / 2;
+  ctx.fillText(label, cx, cy + 6);
+  const ax = pointLeft ? cx - tw / 2 - 13 : cx + tw / 2 + 13, d = pointLeft ? 1 : -1;
+  ctx.strokeStyle = on ? project.color : OUT.frame; ctx.lineWidth = 2.2; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.moveTo(ax + 3.5 * d, cy - 6); ctx.lineTo(ax - 3 * d, cy); ctx.lineTo(ax + 3.5 * d, cy + 6); ctx.stroke();
+  if (on) links.push({rect:[x, y, w, h], target});
+}
+function pageTop(ctx, pin, i, sub) {
+  const rtl = project.dir === "rtl";
   ctx.fillStyle = OUT.bg; ctx.fillRect(0, 0, PW, PH);
   ctx.fillStyle = OUT.band; ctx.fillRect(0, 0, PW, PBAND);
   ctx.strokeStyle = OUT.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, PBAND); ctx.lineTo(PW, PBAND); ctx.stroke();
@@ -965,20 +1022,46 @@ function drawPhotoPage(ctx, pg, exporting, links, spec) {
   while (ctx.measureText(t).width > avail && t.length > 1) t = t.slice(0, -1);
   if (t !== full) t = t.slice(0, -1) + "…";
   ctx.fillStyle = OUT.ink; ctx.textAlign = "start"; ctx.fillText(t, rtl ? cx - 28 : cx + 28, cy + 1);
-  ctx.font = F(400, 15); ctx.fillStyle = OUT.muted; ctx.fillText(Wd.photoOf(j + 1, n), rtl ? cx - 28 : cx + 28, cy + 25);
+  ctx.font = F(400, 15); ctx.fillStyle = OUT.muted; ctx.fillText(sub, rtl ? cx - 28 : cx + 28, cy + 25);
+}
+function drawPhotoPage(ctx, pg, exporting, links, spec) {
+  const Wd = WORDS[project.dir], rtl = project.dir === "rtl", {pin, i, j} = pg, n = pin.photos.length, at = spec.photoAt[pin.id];
+  pageTop(ctx, pin, i, Wd.photoOf(j + 1, n));
   const L = photoLayout(ctx, pg);
   if (!exporting && L.ph._img) ctx.drawImage(L.ph._img, L.fit.x, L.fit.y, L.fit.w, L.fit.h);
   ctx.font = F(400, 18); ctx.fillStyle = OUT.ink; ctx.textAlign = "center"; ctx.direction = project.dir;
   let y = L.fit.y + L.fit.h + 32;
   L.capLines.forEach(s => { ctx.fillText(s, PW / 2, y); y += 25; });
-  const w = (RM - LM - 10) / 2, near = rtl ? LM + w + 10 : LM, far = rtl ? LM : LM + w + 10;
-  halfButton(ctx, near, BTN_Y, w, Wd.back, true, links, 0);
-  halfButton(ctx, far, BTN_Y, w, Wd.toPlace, false, links, spec.first[pin.id]);
+  if (n >= 3) {
+    const tw = (376 - (n - 1) * 8) / n, th = 56;
+    pin.photos.forEach((ph, m) => {
+      const x = rtl ? 388 - (m + 1) * tw - m * 8 : 12 + m * (tw + 8);
+      drawCover(ctx, ph, x, THUMB_Y, tw, th, 6);
+      if (m === j) { ctx.strokeStyle = project.color; ctx.lineWidth = 3; rrect(ctx, x - 1.5, THUMB_Y - 1.5, tw + 3, th + 3, 7); ctx.stroke(); }
+      else links.push({rect:[x, THUMB_Y, tw, th], target:at[m]});
+    });
+  }
+  const bw = 136, prev = j > 0 ? at[j - 1] : null, next = j < n - 1 ? at[j + 1] : null;
+  navButton(ctx, rtl ? RM - bw : LM, NAV_Y, bw, Wd.prev, !rtl, prev, links);
+  navButton(ctx, rtl ? LM : RM - bw, NAV_Y, bw, Wd.next, rtl, next, links);
+  ctx.font = F(400, 16); ctx.fillStyle = OUT.muted; ctx.textAlign = "center"; ctx.direction = "ltr";
+  ctx.fillText(`${j + 1} / ${n}`, PW / 2, NAV_Y + 28);
+  bottomButtons(ctx, pin, links, spec);
+}
+function drawZoomPage(ctx, pg, exporting, links, spec) {
+  const {pin, i} = pg, Z = zoomLayout(pin);
+  pageTop(ctx, pin, i, WORDS[project.dir].zoomSub);
+  if (!exporting) {
+    ctx.drawImage(mapImage, Z.sx, Z.sy, Z.rw, Z.rh, Z.b.x, Z.b.y, Z.b.w, Z.b.h);
+    ring(ctx, Z.ring.x, Z.ring.y, 18);
+  }
+  ctx.strokeStyle = OUT.frame; ctx.lineWidth = 1; ctx.strokeRect(Z.b.x, Z.b.y, Z.b.w, Z.b.h);
+  bottomButtons(ctx, pin, links, spec);
 }
 function estimateBytes() {
   const C = project.map.crop, b = project.map.src.length * 0.75;
   let t = project.map.src.length + b * (C.w * C.h) / (project.map.w * project.map.h);
-  let pages = 1 + project.pins.length;
+  let pages = 1 + project.pins.length * (project.closeups && project.zoomPage ? 2 : 1);
   project.pins.forEach(p => p.photos.forEach(ph => { t += ph.src.length * 0.75; pages++; }));
   return t + pages * 120000;
 }
@@ -1005,7 +1088,7 @@ function drawPreview() {
   if (idx !== undefined) {
     drawPage(c2, spec, spec.pages[idx], false);
     const n = spec.pages.filter(p => p.kind === "info" && p.pin.id === selId).length, np = (spec.photoAt[selId] || []).length;
-    $("pvPinCap").textContent = "Place page" + (n > 1 ? ` (+${n - 1} more)` : "") + (np ? ` · ${np} photo page${np > 1 ? "s" : ""}` : "");
+    $("pvPinCap").textContent = "Place page" + (n > 1 ? ` (+${n - 1} more)` : "") + (spec.zoomAt[selId] != null ? " · map page" : "") + (np ? ` · ${np} photo page${np > 1 ? "s" : ""}` : "");
   } else { c2.fillStyle = OUT.bg; c2.fillRect(0, 0, PW, PH); $("pvPinCap").textContent = "Pin page (pick a pin)"; }
 }
 
@@ -1095,7 +1178,7 @@ armButton($("newBtn"), "Tap again: clear all", async () => {
 const toJpegBytes = (c, q) => new Promise(res => c.toBlob(b => b.arrayBuffer().then(res), "image/jpeg", q));
 function hexRgb(h) { const n = parseInt(h.slice(1), 16); return PDFLib.rgb((n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255); }
 async function makePdf() {
-  const {PDFDocument, PDFName, PDFString, StandardFonts, rgb} = PDFLib;
+  const {PDFDocument, PDFName, PDFString, StandardFonts, rgb, pushGraphicsState, popGraphicsState, rectangle, clip, endPath} = PDFLib;
   const doc = await PDFDocument.create(), bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const c = document.createElement("canvas"); c.width = PW * EXPORT_SCALE; c.height = PH * EXPORT_SCALE;
   const ctx = c.getContext("2d");
@@ -1113,6 +1196,16 @@ async function makePdf() {
     allLinks.push(drawPage(ctx, spec, pg, true));
     const base = await doc.embedJpg(await toJpegBytes(c, 0.9));
     const page = doc.addPage([PW, PH]); page.drawImage(base, {x:0, y:0, width:PW, height:PH});
+    if (pg.kind === "zoom") {
+      const Z = zoomLayout(pg.pin), C = project.map.crop, k = Z.k;
+      const ix = Z.b.x - (Z.sx - C.x) * k, top = Z.b.y - (Z.sy - C.y) * k, iw = C.w * k, ih = C.h * k;
+      page.pushOperators(pushGraphicsState(), rectangle(Z.b.x, PH - Z.b.y - Z.b.h, Z.b.w, Z.b.h), clip(), endPath());
+      page.drawImage(mapJpg, {x:ix, y:PH - top - ih, width:iw, height:ih});
+      page.pushOperators(popGraphicsState());
+      page.drawRectangle({x:Z.b.x, y:PH - Z.b.y - Z.b.h, width:Z.b.w, height:Z.b.h, borderColor:hexRgb(OUT.frame), borderWidth:1});
+      page.drawCircle({x:Z.ring.x, y:PH - Z.ring.y, size:18, borderColor:white, borderWidth:6, borderOpacity:0.9});
+      page.drawCircle({x:Z.ring.x, y:PH - Z.ring.y, size:18, borderColor:pinCol, borderWidth:3});
+    }
     if (pg.kind === "photo") {
       const L = photoLayout(ctx, pg), img = await embedPhoto(L.ph);
       page.drawImage(img, {x:L.fit.x, y:PH - L.fit.y - L.fit.h, width:L.fit.w, height:L.fit.h});
@@ -1192,7 +1285,7 @@ $("saveBtn").onclick = async () => {
   try { await Promise.all([document.fonts.load('400 20px Heebo', 'אבג abc'), document.fonts.load('700 20px Heebo', 'אבג abc')]); } catch (e) {}
   let draft = null;
   try { draft = await store.get("draft"); } catch (e) {}
-  if (!draft) { try { const s = localStorage.getItem("pinmap-draft-v1"); if (s) draft = JSON.parse(s); } catch (e) {} }
+  if (!draft && DB_NAME === "pinmap") { try { const s = localStorage.getItem("pinmap-draft-v1"); if (s) draft = JSON.parse(s); } catch (e) {} }
   if (draft && draft.map && draft.map.src && Array.isArray(draft.pins)) {
     try { await setProject(draft); say("Your draft from last time is back. Tap <b>New</b> to start over."); return; } catch (e) {}
   }
