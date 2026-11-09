@@ -108,6 +108,16 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
 .check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:.95rem;cursor:pointer}
 .check input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--focus);flex:none}
 .foot{max-width:1280px;margin:18px auto 0;color:var(--muted);font-size:.88rem}
+.ph-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.ph-head .f{margin:0}
+.ph-count{color:var(--muted);font-size:.85rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.phl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.phl li{display:grid;grid-template-columns:76px minmax(0,1fr);gap:10px;align-items:start;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px}
+.phl img{width:76px;height:76px;object-fit:cover;border-radius:6px;display:block;max-width:none}
+.phc{display:flex;flex-direction:column;gap:6px;min-width:0}
+.phb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tag{font-size:.8rem;color:var(--focus);font-weight:600}
+.size{color:var(--muted);font-size:.85rem;margin-inline-start:auto;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -152,7 +162,7 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
     </section>
 
     <section class="panel" aria-label="All pins">
-      <div class="sec-h"><h2>All pins</h2></div>
+      <div class="sec-h"><h2>All pins</h2><span class="size" id="sizeEst"></span></div>
       <ol class="plist" id="plist"></ol>
     </section>
 
@@ -187,6 +197,15 @@ textarea.inp{min-height:170px;resize:vertical;line-height:1.5;font-family:Heebo,
       </div>
       <p class="tip">A marker's point sits on the spot, so the map right there stays visible. In the PDF every pin keeps a large tap area, even at size S.</p>
       <label class="check"><input type="checkbox" id="closeIn"><span>Show a close-up of the map on each place's page, with a ring around the spot</span></label>
+      <div class="opts">
+        <div>
+          <span class="f" id="pmLbl">Photos on the place's page</span>
+          <div class="seg" role="group" aria-labelledby="pmLbl">
+            <button type="button" data-pm="side">Side by side</button><button type="button" data-pm="large">Large</button><button type="button" data-pm="thumbs">Small row</button>
+          </div>
+        </div>
+      </div>
+      <p class="tip"><b>Side by side</b> puts the close-up and the first photo next to each other. <b>Large</b> gives the photo the full width. <b>Small row</b> shows up to four thumbnails and leaves the most room for text. Every photo also gets its own full-screen page with its caption.</p>
       <p class="tip">The saved PDF also keeps everything you set up here. Open it with <b>Open map or PDF</b> to change it later.</p>
     </section>
   </aside>
@@ -199,9 +218,12 @@ const SAMPLE = {"src": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
 const PW = 400, PH = 866, EXPORT_SCALE = 3, MAX_SRC = 4096;
 const OUT = {bg:"#FBF8F0", page:"#FFFFFF", band:"#F3EEDF", ink:"#2E2A24", muted:"#6E6658", line:"#E3DAC4", chip:"#FBF8F0", frame:"#B9AE95"};
 const WORDS = {
-  rtl:{back:"חזרה למפה", list:"רשימת המקומות", cont:"(המשך)", places:"המקומות במפה", hint:"הקישו על נקודה במפה או על שם ברשימה"},
-  ltr:{back:"Back to map", list:"All places", cont:"(continued)", places:"Places on this map", hint:"Tap a pin on the map or a name below"}
+  rtl:{back:"חזרה למפה", list:"רשימת המקומות", cont:"(המשך)", places:"המקומות במפה", hint:"הקישו על נקודה במפה או על שם ברשימה",
+    photos:n => n === 1 ? "תמונה אחת" : `${n} תמונות`, photoOf:(a, b) => `תמונה ${a} מתוך ${b}`, more:"לתמונות נוספות", toPlace:"לדף המקום"},
+  ltr:{back:"Back to map", list:"All places", cont:"(continued)", places:"Places on this map", hint:"Tap a pin on the map or a name below",
+    photos:n => n === 1 ? "1 photo" : `${n} photos`, photoOf:(a, b) => `Photo ${a} of ${b}`, more:"More photos", toPlace:"Place page"}
 };
+const MAX_PHOTOS = 6, PHOTO_SIDE = 1600;
 const DROP = "M17 3c-6 0-10.5 4.5-10.5 10.3C6.5 21 17 31 17 31s10.5-10 10.5-17.7C27.5 7.5 23 3 17 3z"; // tip (17,31), head centre (17,13.3), head radius 10.5
 const R_PT = {S:7.5, M:9.5, L:12};     // head radius on the PDF map page, in points
 const R_PX = {S:10, M:13, L:16};       // head radius in the editor, in screen pixels
@@ -250,8 +272,9 @@ function normalize(p) {
   p.v = 2;
   p.pinStyle = p.pinStyle || "drop"; p.pinSize = p.pinSize || "M";
   if (p.closeups === undefined) p.closeups = true;
+  p.photoMode = p.photoMode || "side";
   if (!p.map.crop) p.map.crop = {x:0, y:0, w:p.map.w, h:p.map.h};
-  p.pins.forEach(x => x.id = x.id || uid());
+  p.pins.forEach(x => { x.id = x.id || uid(); x.photos = x.photos || []; x.link = x.link || ""; });
   return p;
 }
 function sampleProject() {
@@ -261,12 +284,41 @@ function sampleProject() {
 }
 function blankProject(map) {
   const o = project || {};
-  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, map, pins:[]});
+  return normalize({title:"", subtitle:"", dir:o.dir || "rtl", color:o.color || "#C8372D", pinStyle:o.pinStyle, pinSize:o.pinSize, closeups:o.closeups, photoMode:o.photoMode, map, pins:[]});
+}
+function attachImg(ph, im) { Object.defineProperty(ph, "_img", {value:im, enumerable:false, writable:true, configurable:true}); }
+async function loadPhotoImgs(p) {
+  for (const pin of p.pins) for (const ph of pin.photos) if (!ph._img) { try { attachImg(ph, await loadImage(ph.src)); } catch (e) {} }
+}
+async function addPhotos(pin, files) {
+  const room = MAX_PHOTOS - pin.photos.length, use = files.slice(0, Math.max(0, room));
+  let bad = 0;
+  if (!use.length) { say(`Each place can have up to ${MAX_PHOTOS} photos. Remove one to add another.`, "err"); return; }
+  say(`Adding ${use.length} photo${use.length > 1 ? "s" : ""}…`);
+  for (const f of use) {
+    try {
+      const src = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+      const im = await loadImage(src), k = Math.min(1, PHOTO_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+      x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, c.width, c.height);
+      const ph = {src:c.toDataURL("image/jpeg", 0.85), w:c.width, h:c.height, cap:""};
+      attachImg(ph, await loadImage(ph.src));
+      pin.photos.push(ph);
+    } catch (e) { bad++; }
+  }
+  const ok = use.length - bad, parts = [];
+  if (ok) parts.push(`Added ${ok} photo${ok > 1 ? "s" : ""}.`);
+  if (files.length > use.length) parts.push(`${files.length - use.length} more didn't fit: each place can have up to ${MAX_PHOTOS} photos.`);
+  if (bad) parts.push(`${bad} couldn't be opened here. Use JPG or PNG photos; on iPhone, pick them from Photos.`);
+  say(parts.join(" "), ok ? "" : "err");
+  renderAll(); changed();
 }
 function loadImage(src) { return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; }); }
 async function setProject(p, sample) {
   project = normalize(p);
   mapImage = await loadImage(p.map.src);
+  await loadPhotoImgs(project);
   $("mapImg").src = p.map.src;
   selId = p.pins[0] ? p.pins[0].id : null;
   mode = "view"; view = {z:1, ox:0, oy:0};
@@ -497,7 +549,13 @@ function renderEditor() {
       <button class="btn small" type="button" id="upBtn" ${i === 0 ? "disabled" : ""}>Move earlier</button>
       <button class="btn small" type="button" id="downBtn" ${i === project.pins.length - 1 ? "disabled" : ""}>Move later</button>
       <button class="btn small danger" type="button" id="delBtn">Delete pin</button>
-    </div>`;
+    </div>
+    <div class="ph-head"><span class="f">Photos</span><span class="ph-count">${p.photos.length} of ${MAX_PHOTOS}</span></div>
+    ${p.photos.length ? `<ul class="phl">${p.photos.map((ph, j) => `<li><img src="${ph.src}" alt="Photo ${j + 1}"><div class="phc"><input class="inp" id="cap${j}" type="text" dir="${d}" value="${esc(ph.cap || "")}" placeholder="${d === "rtl" ? "כיתוב (לא חובה)" : "Caption (optional)"}" aria-label="Caption for photo ${j + 1}"><div class="phb">${j === 0 ? `<span class="tag">Shown on the place's page</span>` : `<button class="btn small" type="button" data-first="${j}">Make first</button>`}<button class="btn small danger" type="button" data-rm="${j}">Remove</button></div></div></li>`).join("")}</ul>` : `<p class="tip">No photos yet. Each photo gets its own full-screen page in the PDF, with its caption.</p>`}
+    <div class="row">${p.photos.length < MAX_PHOTOS ? `<label class="btn small" for="phIn">+ Add photos</label><input id="phIn" class="file-input" type="file" accept="image/*" multiple>` : `<span class="tip">That's the limit of ${MAX_PHOTOS} photos for one place.</span>`}</div>
+    <label class="f" for="linkIn">Link to more photos (optional)</label>
+    <input class="inp" id="linkIn" type="url" dir="ltr" inputmode="url" value="${esc(p.link || "")}" placeholder="https://photos.app.goo.gl/…">
+    <p class="tip">Adds a "${WORDS[d].more}" button to this place's page, for a Google Photos album or similar. It needs internet to open.</p>`;
   $("nameIn").oninput = e => { p.name = e.target.value; renderList(); changed(); };
   $("bodyIn").oninput = e => { p.body = e.target.value; changed(); };
   $("findBtn").onclick = () => {
@@ -513,6 +571,11 @@ function renderEditor() {
     selId = project.pins[Math.min(i, project.pins.length - 1)]?.id ?? null;
     renderAll(); changed();
   });
+  p.photos.forEach((ph, j) => { $("cap" + j).oninput = e => { ph.cap = e.target.value; changed(); }; });
+  sec.querySelectorAll("[data-first]").forEach(b => b.onclick = () => { const [ph] = p.photos.splice(+b.dataset.first, 1); p.photos.unshift(ph); renderAll(); changed(); });
+  sec.querySelectorAll("[data-rm]").forEach(b => armButton(b, "Tap again", () => { p.photos.splice(+b.dataset.rm, 1); renderAll(); changed(); }));
+  if ($("phIn")) $("phIn").onchange = e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) addPhotos(p, fs); };
+  $("linkIn").onchange = e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//i.test(v)) v = "https://" + v; p.link = v; e.target.value = v; changed(); };
 }
 function armButton(btn, armedText, action) {
   const label = btn.textContent; let t = null;
@@ -527,7 +590,7 @@ function renderList() {
   if (!project.pins.length) { ol.innerHTML = `<li class="empty">Pins you add show up here, in the order they're numbered.</li>`; return; }
   project.pins.forEach((p, i) => {
     const li = document.createElement("li");
-    li.innerHTML = `<button type="button" aria-current="${p.id === selId}"><span class="badge">${i + 1}</span><span class="nm ${p.name ? "" : "none"}" dir="auto">${p.name ? esc(p.name) : "No name yet"}</span>${inCrop(p) ? "" : `<span class="out">outside crop</span>`}</button>`;
+    li.innerHTML = `<button type="button" aria-current="${p.id === selId}"><span class="badge">${i + 1}</span><span class="nm ${p.name ? "" : "none"}" dir="auto">${p.name ? esc(p.name) : "No name yet"}</span>${p.photos.length ? `<span class="ph-count">${p.photos.length} photo${p.photos.length > 1 ? "s" : ""}</span>` : ""}${inCrop(p) ? "" : `<span class="out">outside crop</span>`}</button>`;
     li.firstChild.onclick = () => { selId = p.id; renderAll(); };
     ol.appendChild(li);
   });
@@ -541,6 +604,7 @@ function renderSettings() {
   document.querySelectorAll("[data-size]").forEach(b => b.setAttribute("aria-pressed", b.dataset.size === project.pinSize));
   $("colIn").value = project.color.toLowerCase();
   $("closeIn").checked = !!project.closeups;
+  document.querySelectorAll("[data-pm]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pm === project.photoMode));
 }
 $("tIn").oninput = e => { project.title = e.target.value; changed(); };
 $("sIn").oninput = e => { project.subtitle = e.target.value; changed(); };
@@ -551,6 +615,7 @@ $("styDot").onclick = () => { project.pinStyle = "dot"; renderAll(); changed(); 
 document.querySelectorAll("[data-size]").forEach(b => b.onclick = () => { project.pinSize = b.dataset.size; renderAll(); changed(); });
 $("colIn").oninput = e => { project.color = e.target.value; renderPins(); applyView(); renderList(); renderEditor(); changed(); };
 $("closeIn").onchange = e => { project.closeups = e.target.checked; changed(); };
+document.querySelectorAll("[data-pm]").forEach(b => b.onclick = () => { project.photoMode = b.dataset.pm; renderAll(); changed(); });
 
 function renderAll() { renderMapbar(); renderPins(); applyView(); renderEditor(); renderList(); renderSettings(); schedulePreview(); }
 window.addEventListener("resize", () => { if (project) { applyView(); schedulePreview(); } });
@@ -581,9 +646,27 @@ function parseBody(t) {
     return {t:"p", s:s.replace(/\*\*/g, ""), bold:/^\*\*.+\*\*$/.test(s)};
   });
 }
-const LM = 22, RM = PW - 22, BAND = 276, INSET = {x:12, y:286, w:376, h:120}, BTN_Y = PH - 128;
-const bodyTop = () => project.closeups ? INSET.y + INSET.h + 18 : BAND + 40;
+const LM = 22, RM = PW - 22, BAND = 276, BTN_Y = PH - 128, CONT_TOP = BAND + 30, PBAND = 268, PBOX_Y = 282;
 const bodyBottom = BTN_Y - 16;
+// what sits between the title band and the text on a place's first page
+function placeStack(pin) {
+  const rtl = project.dir === "rtl", n = pin.photos.length, cl = project.closeups && inCrop(pin), mode = project.photoMode;
+  const items = []; let y = BAND + 12;
+  if (n && cl && mode === "side") {
+    const w = (376 - 10) / 2, h = 160, a = 12, b = 12 + w + 10;
+    items.push({t:"close", x:rtl ? b : a, y, w, h}, {t:"photo", x:rtl ? a : b, y, w, h, j:0});
+    y += h + 12;
+  } else {
+    if (cl) { const h = n && mode !== "thumbs" ? 100 : 120; items.push({t:"close", x:12, y, w:376, h}); y += h + 10; }
+    if (n && mode === "thumbs") {
+      const k = Math.min(4, n), tw = (376 - 24) / 4, th = 72;
+      for (let j = 0; j < k; j++) items.push({t:"thumb", x:rtl ? 388 - (j + 1) * tw - j * 8 : 12 + j * (tw + 8), y, w:tw, h:th, j, more:j === 3 ? n - 4 : 0});
+      y += th + 12;
+    } else if (n) { const h = cl ? 180 : 220; items.push({t:"photo", x:12, y, w:376, h, j:0}); y += h + 12; }
+  }
+  if (pin.link) { items.push({t:"link", x:LM, y, w:RM - LM, h:40}); y += 52; }
+  return {items, top:items.length ? y + 4 : BAND + 40};
+}
 function bodyLines(ctx, blocks, sz) {
   const out = [], width = RM - LM;
   blocks.forEach(b => {
@@ -600,15 +683,15 @@ function bodyLines(ctx, blocks, sz) {
 const hOf = l => l.gap || l.lh;
 function infoLayout(ctx, pin) {
   ctx.direction = project.dir;
-  const blocks = parseBody(pin.body), avail = bodyBottom - bodyTop();
-  for (let sz = 23; sz >= 17; sz--) {
+  const blocks = parseBody(pin.body), first = bodyBottom - placeStack(pin).top, rest = bodyBottom - CONT_TOP;
+  for (let sz = 23; sz >= 19; sz--) {
     const ls = bodyLines(ctx, blocks, sz);
-    if (ls.reduce((a, l) => a + hOf(l), 0) <= avail) return [ls];
+    if (ls.reduce((a, l) => a + hOf(l), 0) <= first) return [ls];
   }
-  const ls = bodyLines(ctx, blocks, 20), pages = [[]]; let h = 0;
+  const ls = bodyLines(ctx, blocks, 21), pages = [[]]; let h = 0, cap = first;
   ls.forEach(l => {
-    if (h + hOf(l) > avail && !l.gap && pages[pages.length - 1].length) { pages.push([]); h = 0; }
     if (l.gap && h === 0) return;
+    if (!l.gap && h + hOf(l) > cap) { pages.push([]); h = 0; cap = rest; }
     pages[pages.length - 1].push(l); h += hOf(l);
   });
   return pages;
@@ -625,12 +708,13 @@ function mapLayout() {
 function buildSpec(ctx) {
   const ml = mapLayout(), pages = [{kind:"map", ml}];
   if (ml.own) for (let i = 0; i < project.pins.length; i += 22) pages.push({kind:"list", start:i, items:project.pins.slice(i, i + 22)});
-  const first = {};
+  const first = {}, photoAt = {};
   project.pins.forEach((pin, i) => {
     first[pin.id] = pages.length;
     infoLayout(ctx, pin).forEach((lines, k) => pages.push({kind:"info", pin, i, lines, k}));
+    photoAt[pin.id] = pin.photos.map((ph, j) => (pages.push({kind:"photo", pin, i, j}), pages.length - 1));
   });
-  return {pages, first, listStart:ml.own ? 1 : null};
+  return {pages, first, photoAt, listStart:ml.own ? 1 : null};
 }
 // where a pin lands on the map page (top-left origin, points)
 function pinOnPage(ml, p) {
@@ -667,16 +751,17 @@ function sideText(ctx, text, y, font, color) {
   ctx.direction = project.dir; ctx.textAlign = "start"; ctx.font = font; ctx.fillStyle = color;
   ctx.fillText(text, project.dir === "rtl" ? RM : LM, y);
 }
-function chip(ctx, x, y, w, h, n, name, links, target) {
+function chip(ctx, x, y, w, h, n, name, links, target, photos) {
   const rtl = project.dir === "rtl";
   ctx.fillStyle = OUT.chip; ctx.strokeStyle = OUT.line; ctx.lineWidth = 1;
   rrect(ctx, x, y, w, h, 8); ctx.fill(); ctx.stroke();
   drawDot(ctx, rtl ? x + w - 16 : x + 16, y + h / 2, n, 8);
   ctx.font = F(400, 13); ctx.fillStyle = OUT.ink; ctx.direction = project.dir; ctx.textAlign = "start";
   const full = name || "—"; let s = full;
-  while (ctx.measureText(s).width > w - 40 && s.length > 1) s = s.slice(0, -1);
+  while (ctx.measureText(s).width > w - 40 - (photos ? 18 : 0) && s.length > 1) s = s.slice(0, -1);
   if (s !== full) s = s.slice(0, -1) + "…";
   ctx.fillText(s, rtl ? x + w - 30 : x + 30, y + h / 2 + 4.5);
+  if (photos) camera(ctx, rtl ? x + 15 : x + w - 15, y + h / 2, 6.5, OUT.muted, OUT.chip);
   links.push({rect:[x, y, w, h], target});
 }
 function bigButton(ctx, y, label, links, target, arrowBack) {
@@ -693,8 +778,45 @@ function bigButton(ctx, y, label, links, target, arrowBack) {
   }
   links.push({rect:[x, y, w, h], target});
 }
-function drawCloseup(ctx, pin, links) {
-  const W = project.map.w, H = project.map.h, C = project.map.crop, I = INSET;
+function camera(ctx, x, y, s, color, hole) {
+  ctx.save(); ctx.fillStyle = color;
+  rrect(ctx, x - s, y - s * 0.62, s * 2, s * 1.42, s * 0.3); ctx.fill();
+  rrect(ctx, x - s * 0.45, y - s * 0.92, s * 0.9, s * 0.45, s * 0.12); ctx.fill();
+  ctx.fillStyle = hole; ctx.beginPath(); ctx.arc(x, y + s * 0.08, s * 0.46, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y + s * 0.08, s * 0.24, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawCover(ctx, ph, x, y, w, h, r) {
+  if (ph._img) {
+    const k = Math.max(w / ph.w, h / ph.h), sw = w / k, sh = h / k;
+    ctx.save(); rrect(ctx, x, y, w, h, r); ctx.clip();
+    ctx.drawImage(ph._img, (ph.w - sw) / 2, (ph.h - sh) / 2, sw, sh, x, y, w, h);
+    ctx.restore();
+  }
+  ctx.strokeStyle = OUT.frame; ctx.lineWidth = 1; rrect(ctx, x, y, w, h, r); ctx.stroke();
+}
+function photoBadge(ctx, x, y, w, h, text) {
+  const rtl = project.dir === "rtl";
+  ctx.font = F(700, 13); ctx.direction = project.dir;
+  const pw = ctx.measureText(text).width + 40, ph = 28;
+  const px = rtl ? x + w - 8 - pw : x + 8, py = y + h - 8 - ph;
+  ctx.fillStyle = "rgba(20,18,15,.74)"; rrect(ctx, px, py, pw, ph, 14); ctx.fill();
+  camera(ctx, rtl ? px + pw - 17 : px + 17, py + ph / 2, 7, "#fff", "#2a2622");
+  ctx.fillStyle = "#fff"; ctx.textAlign = "start"; ctx.fillText(text, rtl ? px + pw - 31 : px + 31, py + ph / 2 + 4.5);
+}
+function linkButton(ctx, it, label) {
+  const rtl = project.dir === "rtl";
+  ctx.fillStyle = OUT.page; rrect(ctx, it.x, it.y, it.w, it.h, 20); ctx.fill();
+  ctx.strokeStyle = project.color; ctx.lineWidth = 1.5; rrect(ctx, it.x + 0.75, it.y + 0.75, it.w - 1.5, it.h - 1.5, 20); ctx.stroke();
+  ctx.font = F(700, 17); ctx.fillStyle = project.color; ctx.textAlign = "center"; ctx.direction = project.dir;
+  const tw = ctx.measureText(label).width, cx = PW / 2 + (rtl ? 10 : -10), cy = it.y + it.h / 2;
+  ctx.fillText(label, cx, cy + 6);
+  const ax = rtl ? cx - tw / 2 - 16 : cx + tw / 2 + 16;
+  ctx.strokeStyle = project.color; ctx.lineWidth = 2; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(ax - 5, cy + 5); ctx.lineTo(ax + 5, cy - 5); ctx.moveTo(ax - 2, cy - 5); ctx.lineTo(ax + 5, cy - 5); ctx.lineTo(ax + 5, cy + 2); ctx.stroke();
+}
+function drawCloseup(ctx, pin, links, I) {
+  const W = project.map.w, H = project.map.h, C = project.map.crop;
   if (!inCrop(pin)) return false;
   const ar = I.w / I.h;
   let rw = Math.max(C.w * 0.42, Math.min(C.w, 600)), rh = rw / ar;
@@ -739,7 +861,7 @@ function drawPage(ctx, spec, pg, exporting) {
         project.pins.forEach((p, i) => {
           const row = Math.floor(i / 2), col = i % 2, cw = 184;
           const x = project.dir === "rtl" ? (col === 0 ? 12 + cw + 8 : 12) : (col === 0 ? 12 : 12 + cw + 8);
-          chip(ctx, x, listTop + 30 + row * 38, cw, 32, i + 1, p.name, links, spec.first[p.id]);
+          chip(ctx, x, listTop + 30 + row * 38, cw, 32, i + 1, p.name, links, spec.first[p.id], p.photos.length);
         });
       }
     }
@@ -749,9 +871,11 @@ function drawPage(ctx, spec, pg, exporting) {
     pg.items.forEach((p, j) => {
       const i = pg.start + j, row = Math.floor(j / 2), col = j % 2, cw = 184;
       const x = project.dir === "rtl" ? (col === 0 ? 12 + cw + 8 : 12) : (col === 0 ? 12 : 12 + cw + 8);
-      chip(ctx, x, 236 + row * 40, cw, 34, i + 1, p.name, links, spec.first[p.id]);
+      chip(ctx, x, 236 + row * 40, cw, 34, i + 1, p.name, links, spec.first[p.id], p.photos.length);
     });
     bigButton(ctx, BTN_Y, Wd.back, links, 0, true);
+  } else if (pg.kind === "photo") {
+    drawPhotoPage(ctx, pg, exporting, links, spec);
   } else {
     const {pin, i, lines, k} = pg, rtl = project.dir === "rtl";
     ctx.fillStyle = OUT.bg; ctx.fillRect(0, 0, PW, PH);
@@ -768,8 +892,34 @@ function drawPage(ctx, spec, pg, exporting) {
     let ty = cy + ts * 0.34 - (tl.length - 1) * ts * 0.55;
     ctx.fillStyle = OUT.ink; ctx.textAlign = "start";
     tl.forEach(s => { ctx.fillText(s, rtl ? cx - 40 : cx + 40, ty); ty += ts * 1.1; });
-    if (project.closeups && k === 0) drawCloseup(ctx, pin, links);
-    let y = (project.closeups && k === 0) ? bodyTop() : (project.closeups ? INSET.y + 4 : bodyTop());
+    let y = CONT_TOP;
+    if (k === 0) {
+      const st = placeStack(pin), n = pin.photos.length;
+      st.items.forEach(it => {
+        if (it.t === "close") drawCloseup(ctx, pin, links, it);
+        else if (it.t === "photo") {
+          drawCover(ctx, pin.photos[0], it.x, it.y, it.w, it.h, 10);
+          photoBadge(ctx, it.x, it.y, it.w, it.h, Wd.photos(n));
+          links.push({rect:[it.x, it.y, it.w, it.h], target:spec.photoAt[pin.id][0]});
+        } else if (it.t === "thumb") {
+          drawCover(ctx, pin.photos[it.j], it.x, it.y, it.w, it.h, 8);
+          if (it.more > 0) {
+            ctx.fillStyle = "rgba(20,18,15,.58)"; rrect(ctx, it.x, it.y, it.w, it.h, 8); ctx.fill();
+            ctx.fillStyle = "#fff"; ctx.font = F(700, 22); ctx.textAlign = "center"; ctx.direction = "ltr";
+            ctx.fillText("+" + it.more, it.x + it.w / 2, it.y + it.h / 2 + 8);
+          } else if (it.j === 0) {
+            const bx = rtl ? it.x + it.w - 15 : it.x + 15, by = it.y + it.h - 15;
+            ctx.fillStyle = "rgba(20,18,15,.74)"; ctx.beginPath(); ctx.arc(bx, by, 11, 0, Math.PI * 2); ctx.fill();
+            camera(ctx, bx, by, 6, "#fff", "#2a2622");
+          }
+          links.push({rect:[it.x, it.y, it.w, it.h], target:spec.photoAt[pin.id][it.j]});
+        } else if (it.t === "link") {
+          linkButton(ctx, it, Wd.more);
+          links.push({rect:[it.x, it.y, it.w, it.h], uri:pin.link});
+        }
+      });
+      y = st.top;
+    }
     lines.forEach(l => {
       if (l.gap) { y += l.gap; return; }
       const base = y + l.fs;
@@ -778,10 +928,64 @@ function drawPage(ctx, spec, pg, exporting) {
       ctx.fillText(l.s, rtl ? RM - l.ind : LM + l.ind, base);
       y += l.lh;
     });
-    if (!lines.length) { ctx.font = F(400, 18); ctx.fillStyle = OUT.muted; ctx.direction = project.dir; ctx.textAlign = "start"; ctx.fillText(rtl ? "עדיין אין טקסט לנקודה הזאת." : "No text for this pin yet.", rtl ? RM : LM, bodyTop() + 22); }
+    if (!lines.length && k === 0 && !(pin.body || "").trim()) { ctx.font = F(400, 18); ctx.fillStyle = OUT.muted; ctx.direction = project.dir; ctx.textAlign = "start"; ctx.fillText(rtl ? "עדיין אין טקסט לנקודה הזאת." : "No text for this pin yet.", rtl ? RM : LM, y + 22); }
     bigButton(ctx, BTN_Y, Wd.back, links, 0, true);
   }
   return links;
+}
+
+function photoLayout(ctx, pg) {
+  const ph = pg.pin.photos[pg.j], cap = (ph.cap || "").trim();
+  ctx.font = F(400, 18); ctx.direction = project.dir;
+  const capLines = cap ? wrap(ctx, cap, RM - LM).slice(0, 4) : [];
+  const capH = capLines.length ? capLines.length * 25 + 14 : 0, avail = BTN_Y - 18 - PBOX_Y;
+  const k = Math.min(376 / ph.w, (avail - capH) / ph.h), w = ph.w * k, h = ph.h * k;
+  const top = PBOX_Y + (avail - h - capH) / 2;
+  return {ph, capLines, fit:{x:(PW - w) / 2, y:top, w, h}};
+}
+function halfButton(ctx, x, y, w, label, filled, links, target) {
+  const h = 58;
+  ctx.fillStyle = filled ? project.color : OUT.page; rrect(ctx, x, y, w, h, 16); ctx.fill();
+  if (!filled) { ctx.strokeStyle = project.color; ctx.lineWidth = 2; rrect(ctx, x + 1, y + 1, w - 2, h - 2, 15); ctx.stroke(); }
+  ctx.font = F(700, 20); ctx.direction = project.dir; ctx.textAlign = "center"; ctx.fillStyle = filled ? "#fff" : project.color;
+  ctx.fillText(label, x + w / 2, y + h / 2 + 7);
+  links.push({rect:[x, y, w, h], target});
+}
+function drawPhotoPage(ctx, pg, exporting, links, spec) {
+  const Wd = WORDS[project.dir], rtl = project.dir === "rtl", {pin, i, j} = pg, n = pin.photos.length;
+  ctx.fillStyle = OUT.bg; ctx.fillRect(0, 0, PW, PH);
+  ctx.fillStyle = OUT.band; ctx.fillRect(0, 0, PW, PBAND);
+  ctx.strokeStyle = OUT.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, PBAND); ctx.lineTo(PW, PBAND); ctx.stroke();
+  const cx = rtl ? RM - 18 : LM + 18, cy = 226;
+  drawDot(ctx, cx, cy, i + 1, 18);
+  const avail = RM - LM - 48, full = pin.name || (rtl ? "ללא שם" : "Untitled");
+  let ts = 24; ctx.direction = project.dir; ctx.font = F(700, ts);
+  while (ctx.measureText(full).width > avail && ts > 18) { ts--; ctx.font = F(700, ts); }
+  let t = full;
+  while (ctx.measureText(t).width > avail && t.length > 1) t = t.slice(0, -1);
+  if (t !== full) t = t.slice(0, -1) + "…";
+  ctx.fillStyle = OUT.ink; ctx.textAlign = "start"; ctx.fillText(t, rtl ? cx - 28 : cx + 28, cy + 1);
+  ctx.font = F(400, 15); ctx.fillStyle = OUT.muted; ctx.fillText(Wd.photoOf(j + 1, n), rtl ? cx - 28 : cx + 28, cy + 25);
+  const L = photoLayout(ctx, pg);
+  if (!exporting && L.ph._img) ctx.drawImage(L.ph._img, L.fit.x, L.fit.y, L.fit.w, L.fit.h);
+  ctx.font = F(400, 18); ctx.fillStyle = OUT.ink; ctx.textAlign = "center"; ctx.direction = project.dir;
+  let y = L.fit.y + L.fit.h + 32;
+  L.capLines.forEach(s => { ctx.fillText(s, PW / 2, y); y += 25; });
+  const w = (RM - LM - 10) / 2, near = rtl ? LM + w + 10 : LM, far = rtl ? LM : LM + w + 10;
+  halfButton(ctx, near, BTN_Y, w, Wd.back, true, links, 0);
+  halfButton(ctx, far, BTN_Y, w, Wd.toPlace, false, links, spec.first[pin.id]);
+}
+function estimateBytes() {
+  const C = project.map.crop, b = project.map.src.length * 0.75;
+  let t = project.map.src.length + b * (C.w * C.h) / (project.map.w * project.map.h);
+  let pages = 1 + project.pins.length;
+  project.pins.forEach(p => p.photos.forEach(ph => { t += ph.src.length * 0.75; pages++; }));
+  return t + pages * 120000;
+}
+function updateSize() {
+  const el = $("sizeEst"); if (!el || !project) return;
+  const mb = estimateBytes() / 1048576;
+  el.textContent = project.pins.length ? `PDF about ${mb < 1 ? "1" : mb.toFixed(mb < 10 ? 1 : 0)} MB` : "";
 }
 
 /* ---------- preview ---------- */
@@ -794,18 +998,21 @@ function prepCanvas(cv) {
 }
 function drawPreview() {
   if (!project || !mapImage) return;
+  updateSize();
   const c1 = prepCanvas($("pvMap")), spec = buildSpec(c1);
   drawPage(c1, spec, spec.pages[0], false);
   const c2 = prepCanvas($("pvPin")), idx = selId != null ? spec.first[selId] : undefined;
   if (idx !== undefined) {
     drawPage(c2, spec, spec.pages[idx], false);
-    const n = spec.pages.filter(p => p.kind === "info" && p.pin.id === selId).length;
-    $("pvPinCap").textContent = n > 1 ? `Pin page (1 of ${n})` : "Pin page";
+    const n = spec.pages.filter(p => p.kind === "info" && p.pin.id === selId).length, np = (spec.photoAt[selId] || []).length;
+    $("pvPinCap").textContent = "Place page" + (n > 1 ? ` (+${n - 1} more)` : "") + (np ? ` · ${np} photo page${np > 1 ? "s" : ""}` : "");
   } else { c2.fillStyle = OUT.bg; c2.fillRect(0, 0, PW, PH); $("pvPinCap").textContent = "Pin page (pick a pin)"; }
 }
 
 /* ---------- open files ---------- */
 $("fileIn").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) openFile(f); });
+function bytesToB64(b) { let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); }
+function dataUrlBytes(src) { const bin = atob(src.slice(src.indexOf(",") + 1)), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 function utf8ToB64(s) { const b = new TextEncoder().encode(s); let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); }
 function b64ToUtf8(b) { const bin = atob(b), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new TextDecoder().decode(u); }
 function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
@@ -851,8 +1058,18 @@ async function openFile(f) {
         if (data && img) {
           const p = JSON.parse(b64ToUtf8(data.asString()));
           p.map.src = img.asString();
+          let lost = 0;
+          (p.pins || []).forEach(pin => {
+            pin.photos = (pin.photos || []).map(ph => {
+              try {
+                const [a, b] = String(ph.ref).split(" ").map(Number), o = doc.context.lookup(PDFLib.PDFRef.of(a, b));
+                if (!o || !o.contents || !o.contents.length) throw new Error("missing");
+                return {cap:ph.cap || "", w:ph.w, h:ph.h, src:"data:image/jpeg;base64," + bytesToB64(o.contents)};
+              } catch (e) { lost++; return null; }
+            }).filter(Boolean);
+          });
           await setProject(p); changed();
-          say(`Opened <b>${esc(f.name)}</b> for editing. Save the PDF again when you're done.`);
+          say(`Opened <b>${esc(f.name)}</b> for editing. Save the PDF again when you're done.` + (lost ? ` ${lost} photo${lost > 1 ? "s" : ""} couldn't be recovered from this file; add ${lost > 1 ? "them" : "it"} again.` : ""));
           return;
         }
       } catch (err) { /* not a Pin Map Maker file; use it as a map */ }
@@ -889,12 +1106,17 @@ async function makePdf() {
   mc.width = C.w; mc.height = C.h;
   const mx = mc.getContext("2d"); mx.fillStyle = "#fff"; mx.fillRect(0, 0, C.w, C.h); mx.drawImage(mapImage, C.x, C.y, C.w, C.h, 0, 0, C.w, C.h);
   const mapJpg = await doc.embedJpg(await toJpegBytes(mc, 0.92));
-  const pinCol = hexRgb(project.color), white = rgb(1, 1, 1);
+  const pinCol = hexRgb(project.color), white = rgb(1, 1, 1), photoCache = new Map();
+  const embedPhoto = async ph => { if (!photoCache.has(ph)) photoCache.set(ph, await doc.embedJpg(dataUrlBytes(ph.src))); return photoCache.get(ph); };
   for (const pg of spec.pages) {
     ctx.setTransform(EXPORT_SCALE, 0, 0, EXPORT_SCALE, 0, 0);
     allLinks.push(drawPage(ctx, spec, pg, true));
     const base = await doc.embedJpg(await toJpegBytes(c, 0.9));
     const page = doc.addPage([PW, PH]); page.drawImage(base, {x:0, y:0, width:PW, height:PH});
+    if (pg.kind === "photo") {
+      const L = photoLayout(ctx, pg), img = await embedPhoto(L.ph);
+      page.drawImage(img, {x:L.fit.x, y:PH - L.fit.y - L.fit.h, width:L.fit.w, height:L.fit.h});
+    }
     if (pg.kind === "map") {
       const im = pg.ml.img;
       page.drawImage(mapJpg, {x:im.x, y:PH - im.y - im.h, width:im.w, height:im.h});
@@ -918,15 +1140,23 @@ async function makePdf() {
     pages.push(page);
   }
   pages.forEach((page, i) => {
-    const refs = allLinks[i].filter(l => l.target != null && pages[l.target]).map(l => {
-      const [x, y, w, h] = l.rect;
-      return doc.context.register(doc.context.obj({Type:"Annot", Subtype:"Link", Rect:[x, PH - y - h, x + w, PH - y], Border:[0, 0, 0], F:4, Dest:[pages[l.target].ref, "Fit"]}));
+    const refs = allLinks[i].filter(l => l.uri || (l.target != null && pages[l.target])).map(l => {
+      const [x, y, w, h] = l.rect, a = {Type:"Annot", Subtype:"Link", Rect:[x, PH - y - h, x + w, PH - y], Border:[0, 0, 0], F:4};
+      if (l.uri) a.A = doc.context.obj({S:"URI", URI:PDFString.of(l.uri.replace(/[^\x21-\x7e]/g, c => encodeURIComponent(c)))});
+      else a.Dest = [pages[l.target].ref, "Fit"];
+      return doc.context.register(doc.context.obj(a));
     });
     if (refs.length) page.node.set(PDFName.of("Annots"), doc.context.obj(refs));
   });
   doc.setTitle(project.title || "Pin map"); doc.setCreator("Pin Map Maker");
-  const {map, sample, ...rest} = project, info = doc.getInfoDict();
-  info.set(PDFName.of("PinMapData"), PDFString.of(utf8ToB64(JSON.stringify({...rest, map:{w:map.w, h:map.h, crop:map.crop}}))));
+  const {map, sample, pins, ...rest} = project, info = doc.getInfoDict();
+  const pinsOut = [];
+  for (const p of pins) {
+    const photos = [];
+    for (const ph of p.photos) { const r = (await embedPhoto(ph)).ref; photos.push({cap:ph.cap || "", w:ph.w, h:ph.h, ref:r.objectNumber + " " + r.generationNumber}); }
+    pinsOut.push({...p, photos});
+  }
+  info.set(PDFName.of("PinMapData"), PDFString.of(utf8ToB64(JSON.stringify({...rest, pins:pinsOut, map:{w:map.w, h:map.h, crop:map.crop}}))));
   info.set(PDFName.of("PinMapImage"), PDFString.of(map.src));
   return doc.save();
 }
@@ -935,19 +1165,23 @@ $("saveBtn").onclick = async () => {
   if (!project.pins.length) { say("Add at least one pin before saving.", "err"); return; }
   btn.disabled = true; btn.textContent = "Building…";
   try {
-    const bytes = await makePdf();
+    const bytes = await makePdf(), blob = new Blob([bytes], {type:"application/pdf"});
     const name = ((project.title || "pin-map").replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 60) || "pin-map") + ".pdf";
-    const blob = new Blob([bytes], {type:"application/pdf"});
-    const url = URL.createObjectURL(blob), a = document.createElement("a");
-    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    say(`Saved <b>${esc(name)}</b> to your downloads. Open it in any PDF viewer, or send it to anyone.`);
-    return;
-    try { await dl.save({filename:name, data:new Blob([bytes], {type:"application/pdf"})}); say(`Saved <b>${esc(name)}</b>. Open it in Files or Books on your phone, or send it to anyone.`); }
-    catch (err) {
-      if (err && err.code === "declined") say("Save cancelled.");
-      else if (err && err.code === "rate_limited") say("A save prompt is already open. Finish that one first.", "err");
-      else say("The PDF couldn't be saved here. Try again in a moment.", "err");
+    const done = `Saved <b>${esc(name)}</b> (${(bytes.length / 1048576).toFixed(1)} MB). Open it in Files or Books on your phone, or send it to anyone.`;
+    if (window.claude && window.claude.use) {
+      const dl = await window.claude.use("downloads");
+      if (!dl) { say("Saving files isn't available in this view. Open this page in the Claude app or at claude.ai to save the PDF.", "err"); return; }
+      try { await dl.save({filename:name, data:blob}); say(done); }
+      catch (err) {
+        if (err && err.code === "declined") say("Save cancelled.");
+        else if (err && err.code === "rate_limited") say("A save prompt is already open. Finish that one first.", "err");
+        else say("The PDF couldn't be saved here. Try again in a moment.", "err");
+      }
+    } else {
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      say(done);
     }
   } catch (err) { console.error(err); say("Something went wrong building the PDF. Try again, or try a smaller map image.", "err"); }
   finally { btn.disabled = false; btn.textContent = "Save PDF"; }
