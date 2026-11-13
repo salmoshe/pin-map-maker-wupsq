@@ -240,7 +240,8 @@ const R_PT = {S:7.5, M:9.5, L:12};     // head radius on the PDF map page, in po
 const R_PX = {S:10, M:13, L:16};       // head radius in the editor, in screen pixels
 const TAP = 22;                        // half-size of each pin's tap area in the PDF
 
-let project = null, mapImage = null, selId = null;
+let project = null, mapImage = null, selId = null, building = false;
+const numOf = i => project._nums ? project._nums[i] : i + 1;
 let mode = "view";                     // view | add | crop
 let view = {z:1, ox:0, oy:0};
 let cropTmp = null;
@@ -272,6 +273,7 @@ let draftTimer = null, draftWarned = false;
 function changed() {
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
+    if (building) { changed(); return; }
     store.set("draft", JSON.parse(JSON.stringify(project))).catch(() => {
       if (!draftWarned) { draftWarned = true; say("This browser can't keep a draft right now. Save the PDF to keep your work."); }
     });
@@ -569,7 +571,10 @@ function renderEditor() {
     <div class="row">${p.photos.length < MAX_PHOTOS ? `<label class="btn small" for="phIn">+ Add photos</label><input id="phIn" class="file-input" type="file" accept="image/*" multiple>` : `<span class="tip">That's the limit of ${MAX_PHOTOS} photos for one place.</span>`}</div>
     <label class="f" for="linkIn">Link to more photos (optional)</label>
     <input class="inp" id="linkIn" type="url" dir="ltr" inputmode="url" value="${esc(p.link || "")}" placeholder="https://photos.app.goo.gl/…">
-    <p class="tip">Adds a "${WORDS[d].more}" button to this place's page, for a Google Photos album or similar. It needs internet to open.</p>`;
+    <p class="tip">Adds a "${WORDS[d].more}" button to this place's page, for a Google Photos album or similar. It needs internet to open.</p>
+    <div class="ph-head"><span class="f">Share this place</span></div>
+    <p class="tip">Makes a small PDF with only this place: its page, the map close-up, its photos, and where it is on the map. Handy for sending one place on WhatsApp.</p>
+    <div class="row"><button class="btn small" type="button" id="oneBtn">PDF of this place only</button></div>`;
   $("nameIn").oninput = e => { p.name = e.target.value; renderList(); changed(); };
   $("bodyIn").oninput = e => { p.body = e.target.value; changed(); };
   $("findBtn").onclick = () => {
@@ -589,6 +594,7 @@ function renderEditor() {
   sec.querySelectorAll("[data-first]").forEach(b => b.onclick = () => { const [ph] = p.photos.splice(+b.dataset.first, 1); p.photos.unshift(ph); renderAll(); changed(); });
   sec.querySelectorAll("[data-rm]").forEach(b => armButton(b, "Tap again", () => { p.photos.splice(+b.dataset.rm, 1); renderAll(); changed(); }));
   if ($("phIn")) $("phIn").onchange = e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) addPhotos(p, fs); };
+  $("oneBtn").onclick = () => saveOne(p, $("oneBtn"));
   $("linkIn").onchange = e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//i.test(v)) v = "https://" + v; p.link = v; e.target.value = v; changed(); };
 }
 function armButton(btn, armedText, action) {
@@ -912,7 +918,7 @@ function drawPage(ctx, spec, pg, exporting) {
     project.pins.forEach((p, i) => {
       if (!inCrop(p)) return;
       const q = pinOnPage(pg.ml, p);
-      if (!exporting) drawMapPin(ctx, q.x, q.y, i + 1);
+      if (!exporting) drawMapPin(ctx, q.x, q.y, numOf(i));
       const h = headCentre(q.x, q.y, R_PT[project.pinSize]);
       links.push({rect:[h.x - TAP, h.y - TAP, TAP * 2, TAP * 2], target:spec.first[p.id]});
     });
@@ -923,7 +929,7 @@ function drawPage(ctx, spec, pg, exporting) {
         project.pins.forEach((p, i) => {
           const row = Math.floor(i / 2), col = i % 2, cw = 184;
           const x = project.dir === "rtl" ? (col === 0 ? 12 + cw + 8 : 12) : (col === 0 ? 12 : 12 + cw + 8);
-          chip(ctx, x, listTop + 30 + row * 38, cw, 32, i + 1, p.name, links, spec.first[p.id], p.photos.length);
+          chip(ctx, x, listTop + 30 + row * 38, cw, 32, numOf(i), p.name, links, spec.first[p.id], p.photos.length);
         });
       }
     }
@@ -933,7 +939,7 @@ function drawPage(ctx, spec, pg, exporting) {
     pg.items.forEach((p, j) => {
       const i = pg.start + j, row = Math.floor(j / 2), col = j % 2, cw = 184;
       const x = project.dir === "rtl" ? (col === 0 ? 12 + cw + 8 : 12) : (col === 0 ? 12 : 12 + cw + 8);
-      chip(ctx, x, 236 + row * 40, cw, 34, i + 1, p.name, links, spec.first[p.id], p.photos.length);
+      chip(ctx, x, 236 + row * 40, cw, 34, numOf(i), p.name, links, spec.first[p.id], p.photos.length);
     });
     bigButton(ctx, BTN_Y, Wd.back, links, 0, true);
   } else if (pg.kind === "photo") {
@@ -947,7 +953,7 @@ function drawPage(ctx, spec, pg, exporting) {
     ctx.strokeStyle = OUT.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, BAND); ctx.lineTo(PW, BAND); ctx.stroke();
     if (project.title) sideText(ctx, project.title, 186, F(400, 14), OUT.muted);
     const cx = rtl ? RM - 26 : LM + 26, cy = 232;
-    drawDot(ctx, cx, cy, i + 1, 26);
+    drawDot(ctx, cx, cy, numOf(i), 26);
     const title = (pin.name || (rtl ? "ללא שם" : "Untitled")) + (k ? " " + Wd.cont : "");
     const tAvail = RM - LM - 66; let ts = 34;
     ctx.direction = project.dir; ctx.font = F(700, ts);
@@ -1050,7 +1056,7 @@ function pageTop(ctx, pin, i, sub) {
   ctx.fillStyle = OUT.band; ctx.fillRect(0, 0, PW, PBAND);
   ctx.strokeStyle = OUT.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, PBAND); ctx.lineTo(PW, PBAND); ctx.stroke();
   const cx = rtl ? RM - 18 : LM + 18, cy = 226;
-  drawDot(ctx, cx, cy, i + 1, 18);
+  drawDot(ctx, cx, cy, numOf(i), 18);
   const avail = RM - LM - 48, full = pin.name || (rtl ? "ללא שם" : "Untitled");
   let ts = 24; ctx.direction = project.dir; ctx.font = F(700, ts);
   while (ctx.measureText(full).width > avail && ts > 18) { ts--; ctx.font = F(700, ts); }
@@ -1117,6 +1123,7 @@ function prepCanvas(cv) {
 }
 function drawPreview() {
   if (!project || !mapImage) return;
+  if (building) { schedulePreview(); return; }
   updateSize();
   const c1 = prepCanvas($("pvMap")), spec = buildSpec(c1);
   drawPage(c1, spec, spec.pages[0], false);
@@ -1174,6 +1181,7 @@ async function openFile(f) {
       try {
         const doc = await PDFLib.PDFDocument.load(buf.slice(0), {updateMetadata:false, ignoreEncryption:true});
         const info = doc.getInfoDict(), data = info.lookup(PDFLib.PDFName.of("PinMapData")), img = info.lookup(PDFLib.PDFName.of("PinMapImage"));
+        if (info.lookup(PDFLib.PDFName.of("PinMapSingle"))) { say("This PDF holds one place shared from a map, so it can't be edited here. Open the full map's PDF instead.", "err"); return; }
         if (data && img) {
           const p = JSON.parse(b64ToUtf8(data.asString()));
           p.map.src = img.asString();
@@ -1213,7 +1221,14 @@ armButton($("newBtn"), "Tap again: clear all", async () => {
 /* ---------- save PDF ---------- */
 const toJpegBytes = (c, q) => new Promise(res => c.toBlob(b => b.arrayBuffer().then(res), "image/jpeg", q));
 function hexRgb(h) { const n = parseInt(h.slice(1), 16); return PDFLib.rgb((n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255); }
-async function makePdf() {
+async function makePdf(only) {
+  const full = project;
+  if (only) project = {...full, pins:[only], _nums:[full.pins.indexOf(only) + 1]};
+  building = true;
+  try { return await buildPdf(!!only); }
+  finally { project = full; building = false; }
+}
+async function buildPdf(single) {
   const {PDFDocument, PDFName, PDFString, StandardFonts, rgb, pushGraphicsState, popGraphicsState, rectangle, clip, endPath} = PDFLib;
   const doc = await PDFDocument.create(), bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const c = document.createElement("canvas"); c.width = PW * EXPORT_SCALE; c.height = PH * EXPORT_SCALE;
@@ -1227,9 +1242,12 @@ async function makePdf() {
   const mapJpg = await doc.embedJpg(await toJpegBytes(mc, 0.92));
   const pinCol = hexRgb(project.color), white = rgb(1, 1, 1), photoCache = new Map();
   const embedPhoto = async ph => { if (!photoCache.has(ph)) photoCache.set(ph, await doc.embedJpg(dataUrlBytes(ph.src))); return photoCache.get(ph); };
-  for (const pg of spec.pages) {
+  const order = spec.pages.map((_, k) => k);
+  if (single) order.push(order.shift());           // one place: open on its page, overview map last
+  for (const idx of order) {
+    const pg = spec.pages[idx];
     ctx.setTransform(EXPORT_SCALE, 0, 0, EXPORT_SCALE, 0, 0);
-    allLinks.push(drawPage(ctx, spec, pg, true));
+    allLinks[idx] = drawPage(ctx, spec, pg, true);
     const base = await doc.embedJpg(await toJpegBytes(c, 0.9));
     const page = doc.addPage([PW, PH]); page.drawImage(base, {x:0, y:0, width:PW, height:PH});
     if (pg.kind === "zoom") {
@@ -1253,7 +1271,7 @@ async function makePdf() {
       const R = R_PT[project.pinSize];
       project.pins.forEach((p, i) => {
         if (!inCrop(p)) return;
-        const q = pinOnPage(pg.ml, p), X = q.x, Y = PH - q.y, n = String(i + 1);
+        const q = pinOnPage(pg.ml, p), X = q.x, Y = PH - q.y, n = String(numOf(i));
         if (project.pinStyle === "drop") {
           const k = R / 10.5;
           page.drawSvgPath(DROP, {x:X - 17 * k + 0.5, y:Y + 31 * k - 0.9, scale:k, color:rgb(0, 0, 0), opacity:0.22});
@@ -1266,7 +1284,7 @@ async function makePdf() {
         page.drawText(n, {x:h.x - bold.widthOfTextAtSize(n, fs) / 2, y:PH - h.y - fs * 0.36, size:fs, font:bold, color:white});
       });
     }
-    pages.push(page);
+    pages[idx] = page;
   }
   pages.forEach((page, i) => {
     const refs = allLinks[i].filter(l => l.uri || (l.target != null && pages[l.target])).map(l => {
@@ -1277,7 +1295,13 @@ async function makePdf() {
     });
     if (refs.length) page.node.set(PDFName.of("Annots"), doc.context.obj(refs));
   });
-  doc.setTitle(project.title || "Pin map"); doc.setCreator("Pin Map Maker");
+  doc.setCreator("Pin Map Maker");
+  if (single) {
+    doc.setTitle([project.title, project.pins[0].name].filter(Boolean).join(" - ") || "Pin map");
+    doc.getInfoDict().set(PDFName.of("PinMapSingle"), PDFString.of("1"));
+    return doc.save();
+  }
+  doc.setTitle(project.title || "Pin map");
   const {map, sample, pins, ...rest} = project, info = doc.getInfoDict();
   const pinsOut = [];
   for (const p of pins) {
@@ -1289,32 +1313,45 @@ async function makePdf() {
   info.set(PDFName.of("PinMapImage"), PDFString.of(map.src));
   return doc.save();
 }
+const safeName = t => (t.replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) || "pin-map") + ".pdf";
+async function deliver(name, bytes, done) {
+  const blob = new Blob([bytes], {type:"application/pdf"});
+  if (window.claude && window.claude.use) {
+    const dl = await window.claude.use("downloads");
+    if (!dl) { say("Saving files isn't available in this view. Open this page in the Claude app or at claude.ai to save the PDF.", "err"); return; }
+    try { await dl.save({filename:name, data:blob}); say(done); }
+    catch (err) {
+      if (err && err.code === "declined") say("Save cancelled.");
+      else if (err && err.code === "rate_limited") say("A save prompt is already open. Finish that one first.", "err");
+      else say("The PDF couldn't be saved here. Try again in a moment.", "err");
+    }
+  } else {
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    say(done);
+  }
+}
+const mbOf = bytes => (bytes.length / 1048576).toFixed(1) + " MB";
 $("saveBtn").onclick = async () => {
   const btn = $("saveBtn");
   if (!project.pins.length) { say("Add at least one pin before saving.", "err"); return; }
   btn.disabled = true; btn.textContent = "Building…";
   try {
-    const bytes = await makePdf(), blob = new Blob([bytes], {type:"application/pdf"});
-    const name = ((project.title || "pin-map").replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 60) || "pin-map") + ".pdf";
-    const done = `Saved <b>${esc(name)}</b> (${(bytes.length / 1048576).toFixed(1)} MB). Open it in Files or Books on your phone, or send it to anyone.`;
-    if (window.claude && window.claude.use) {
-      const dl = await window.claude.use("downloads");
-      if (!dl) { say("Saving files isn't available in this view. Open this page in the Claude app or at claude.ai to save the PDF.", "err"); return; }
-      try { await dl.save({filename:name, data:blob}); say(done); }
-      catch (err) {
-        if (err && err.code === "declined") say("Save cancelled.");
-        else if (err && err.code === "rate_limited") say("A save prompt is already open. Finish that one first.", "err");
-        else say("The PDF couldn't be saved here. Try again in a moment.", "err");
-      }
-    } else {
-      const url = URL.createObjectURL(blob), link = document.createElement("a");
-      link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      say(done);
-    }
+    const bytes = await makePdf(), name = safeName(project.title || "pin-map");
+    await deliver(name, bytes, `Saved <b>${esc(name)}</b> (${mbOf(bytes)}). Open it in Files or Books on your phone, or send it to anyone.`);
   } catch (err) { console.error(err); say("Something went wrong building the PDF. Try again, or try a smaller map image.", "err"); }
   finally { btn.disabled = false; btn.textContent = "Save PDF"; }
 };
+async function saveOne(pin, btn) {
+  const label = btn.textContent; btn.disabled = true; btn.textContent = "Building…";
+  try {
+    const n = project.pins.indexOf(pin) + 1, bytes = await makePdf(pin);
+    const name = safeName([project.title, pin.name || `place ${n}`].filter(Boolean).join(" - "));
+    await deliver(name, bytes, `Saved <b>${esc(name)}</b> (${mbOf(bytes)}) with only this place. Send it on WhatsApp like any other file. This file can't be opened for editing; keep using the full map's PDF for that.`);
+  } catch (err) { console.error(err); say("Something went wrong building this place's PDF. Try again.", "err"); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
 
 /* ---------- start ---------- */
 (async () => {
